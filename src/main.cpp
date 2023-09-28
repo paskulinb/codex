@@ -10,9 +10,12 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; ++i)
     {
         char* filename = *(argv+i);
-        std::cout << filename << std::endl;
-        std::ifstream ifs (*(argv+i), std::ifstream::in);
         p.Parse(filename);
+    }
+    else
+    {
+        std::string file("C:/Users/paskulin/source/repos/Projects.SPS.MSW2/src/application/ep2/ep2.h");
+        p.Parse(file);
     }
 
     return 0;
