@@ -14,7 +14,8 @@ int main(int argc, char **argv)
     }
     else
     {
-        std::string file("C:/Users/paskulin/source/repos/Projects.SPS.MSW2/src/application/ep2/ep2.h");
+        //std::string file("C:/Users/paskulin/source/repos/Projects.SPS.MSW2/src/application/ep2/ep2.h");
+        std::string file("C:/Users/paskulin/source/repos/Projects.SPS.MSW2/src/application/ep2/ep2_app.c");
         p.Parse(file);
     }
 
