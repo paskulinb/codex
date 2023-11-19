@@ -10,13 +10,13 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; ++i)
     {
         char* filename = *(argv+i);
-        p.Parse(filename);
+        p.parse(filename);
     }
     else
     {
         //std::string file("C:/Users/paskulin/source/repos/Projects.SPS.MSW2/src/application/ep2/ep2.h");
         std::string file("C:/Users/paskulin/source/repos/Projects.SPS.MSW2/src/application/ep2/ep2_app.c");
-        p.Parse(file);
+        p.parse(file);
     }
 
     return 0;

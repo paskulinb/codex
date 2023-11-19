@@ -29,7 +29,7 @@ private:
 
 public:
     Parser();
-    void Parse(std::string filename);
+    void parse(std::string filename);
     char* ReadFile(std::string filename);
     bool isspecifier(const char ch);
     bool isalnum_us(const char ch);
@@ -50,6 +50,7 @@ public:
 
     const char* process_comment(const char* p);
     const char* process_macro(const char* p);
+    const char* process_extern(const char* p);
     const char* process_typedef(const char* p);
     const char* process_enum(const char* p);
     const char* process_struct(const char* p);

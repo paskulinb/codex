@@ -135,6 +135,7 @@ const char* Parser::find_closing_bracket(const char* p)
 
         if ('/' == *p)
         {
+            ct_push(Ct::CT_COMMENT);
             p = process_comment(p);
         }
 
@@ -182,7 +183,7 @@ char* Parser::ReadFile(std::string filename)
     return buff;
 }
 
-void Parser::Parse(std::string filename)
+void Parser::parse(std::string filename)
 {
     std::cout << "############## " << filename << " ###############" << std::endl;
     file_buff = ReadFile(filename);
@@ -202,9 +203,15 @@ void Parser::Parse(std::string filename)
             switch (ct_top().type())
             {
             case Ct::CT_EXTERN:
-                P = goto_nextline(P);
-                ct_pop();
-                tokens.clear();
+                P = process_extern(P);
+                break;
+
+            case Ct::CT_MACRO:
+                P = process_macro(P);
+                break;
+
+            case Ct::CT_COMMENT:
+                P = process_comment(P);
                 break;
 
             case Ct::CT_TYPEDEF:
@@ -273,8 +280,7 @@ const char* Parser::go_forward(const char* p)
         if (Ct::CT_STRING_LITERAL != ct_top().type())
         {
             ct_push(Ct::CT_MACRO);
-            p = process_macro(p);
-            return ++p;
+            return p;
         }
         break;
 
@@ -282,8 +288,8 @@ const char* Parser::go_forward(const char* p)
 
         if (Ct::CT_STRING_LITERAL != ct_top().type())
         {
-            p = process_comment(p);
-            return ++p;
+            ct_push(Ct::CT_COMMENT);
+            return p;
         }
         break;
 
@@ -304,8 +310,8 @@ const char* Parser::go_forward(const char* p)
 
         if (Ct::CT_FUNCTION_ARGS == ct_top().type())
         {
-            ct_pop();
-            return ++p;
+            //ct_pop();
+            //return ++p;
         }
         break;
 
@@ -429,9 +435,11 @@ const char* Parser::process_comment(const char* p)
         std::cout << "L_COMMENT_BLOCK" << std::endl;
         ct_push(Ct::CT_COMMENT_BLOCK);
         p = goto_commentblock_end(p);
+        ++p;
         ct_pop();
         break;
     }
+    ct_pop(); //exit CT_COMMENT
     return p;
 }
 
@@ -445,6 +453,15 @@ const char* Parser::process_macro(const char* p)
     std::cout << std::endl;
     p =  goto_eol(p);
     ct_pop();
+    return p;
+}
+
+const char* Parser::process_extern(const char* p)
+{
+    std::cout << "L_EXTERN" << std::endl;
+    p = goto_nextline(p);
+    ct_pop();
+    tokens.clear();
     return p;
 }
 
@@ -492,6 +509,8 @@ const char* Parser::process_function_args(const char* p)
 {
     std::cout << "L_FUNCTION_ARGS" << std::endl;
     p = find_closing_bracket(p);
+    ct_pop();
+    ++p;
     return p;
 }
 
@@ -499,6 +518,10 @@ const char* Parser::process_function_body(const char* p)
 {
     std::cout << "L_FUNCTION_BODY" << std::endl;
     p = find_closing_bracket(p);
+    tokens.clear();
+    ct_pop();
+    ct_pop(); //exit also CT_FUNCTION level
+    ++p;
     return p;
 }
 
