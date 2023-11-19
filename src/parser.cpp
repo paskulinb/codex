@@ -71,6 +71,21 @@ const char* Parser::goto_first_of(const char* chars, const char* p)
     return nullptr;
 }
 
+const char* Parser::goto_eol(const char* p)
+{
+    if (nullptr == p) return nullptr;
+
+    while ((*p != '\n') && (*p != '\r'))
+    {
+        if (*(++p) == '\0') return nullptr;
+    }
+    while ((*(p+1) == '\n') || (*(p+1) == '\r'))
+    {
+        if (*(++p) == '\0') return nullptr;
+    }
+    return p;
+}
+
 const char* Parser::goto_nextline(const char* p)
 {
     if (nullptr == p) return nullptr;
@@ -86,16 +101,14 @@ const char* Parser::goto_nextline(const char* p)
     return p;
 }
 
-const char* Parser::goto_commentblock_passend(const char* p)
+const char* Parser::goto_commentblock_end(const char* p)
 {
     if (nullptr == p) return nullptr;
 
     if (nullptr == (p = strstr(p, "*/")))
         return nullptr;
 
-    p += 2;
-    if ('\0' == *p)
-        return nullptr;
+    ++p;
 
     return p;
 }
@@ -145,6 +158,11 @@ unsigned int Parser::count_characters(const char* from, const char* to, const ch
     return count;
 }
 
+unsigned int Parser::get_line(const char* to)
+{
+    return 1 + count_characters(file_buff, to, '\n');
+}
+
 
 
 char* Parser::ReadFile(std::string filename)
@@ -167,89 +185,233 @@ char* Parser::ReadFile(std::string filename)
 void Parser::Parse(std::string filename)
 {
     std::cout << "############## " << filename << " ###############" << std::endl;
-    file_start = ReadFile(filename);
-    const char* P = file_start;
+    file_buff = ReadFile(filename);
+    const char* P = file_buff;
 
 
-    level = std::stack<Level>();
-    level.push(L_BASE);
+    level = std::stack<Ct>();
+    ct_push(Ct::CT_NONE);
 
-    while (true)
+    try
     {
-        P = skip_blankspaces(P);
-        
-        if ('\0' == *P) break;
-
-        switch (*P)
+        while (nullptr != P)
         {
-        case '#':
-            P = process_macro(P);
-            continue;
-            break;
+            P = go_forward(P);
+            
 
-        case '/':
-            if (L_STRING_LITERAL != level.top())
+            switch (ct_top().type())
             {
-                P = process_comment(P);
-                continue;
-            }
-            break;
-
-        case '(':
-            if (!hold.empty())
-            {
-                P = process_function(P);
-                continue;
-            }
-            break;
-
-        case '=':
-            /* initialization */
-            std::cout << "variable/struct/class initialization" << std::endl;
-            P = goto_char(';', P);
-            ++P;
-            hold.clear();
-            continue;
-            break;
-        }
-
-        /* Identifier, Specifier */
-        P = determine_specifier(P);
-        if (!word.empty())
-        {
-            hold.push_back(word);
-
-            if ("typedef" == word)
-            {
-                P = process_typedef(P);
-                continue;
-            }
-            else if ("struct" == word)
-            {
-                P = process_struct(P);
-                continue;
-            }
-            else if ("enum" == word)
-            {
-                P = process_enum(P);
-                continue;
-            }
-            else if ("extern" == word)
-            {
+            case Ct::CT_EXTERN:
                 P = goto_nextline(P);
-                continue;
+                ct_pop();
+                tokens.clear();
+                break;
+
+            case Ct::CT_TYPEDEF:
+                P = process_typedef(P);
+                break;
+
+            case Ct::CT_ENUM:
+                P = process_enum(P);
+                break;
+
+            case Ct::CT_STRUCT:
+                P = process_struct(P);
+                break;
+
+            case Ct::CT_STRUCT_BODY:
+                P = process_struct_body(P);
+                break;
+
+            case Ct::CT_FUNCTION:
+                P = process_function(P);
+                break;
+
+            case Ct::CT_FUNCTION_ARGS:
+                P = process_function_args(P);
+                break;
+
+            case Ct::CT_FUNCTION_BODY:
+                P = process_function_body(P);
+                break;
             }
-
-            continue;
         }
-
-        std::cout << "Unresolved: " << " line:" << count_characters(file_start, P, '\n') + 1 << " level:" << level.top() << std::endl;
-        return;
     }
-    
-    std::cout << "Finished" << std::endl;
+    catch (PExcept e)
+    {
+        switch (e)
+        {
+        case PExcept::E_UNRESOLVED:
+            std::cout << "Unresolved: " << " line:" << count_characters(file_buff, P, '\n') + 1 << " construct type:" << level.top().type() << std::endl;
+            break;
 
-    delete[] file_start;
+        case PExcept::E_EOF:
+            std::cout << "Finished" << std::endl;
+            break;
+        }
+    }
+
+    delete[] file_buff;
+}
+
+const char* Parser::go_forward(const char* p)
+{
+    p = skip_blankspaces(p);
+    
+    auto line = get_line(p);
+    std::cout << "L:" << line << std::endl;
+
+    if ('\0' == *p)
+    {
+        throw PExcept::E_EOF;
+    }
+
+    switch (*p)
+    {
+    case '#':
+
+        if (Ct::CT_STRING_LITERAL != ct_top().type())
+        {
+            ct_push(Ct::CT_MACRO);
+            p = process_macro(p);
+            return ++p;
+        }
+        break;
+
+    case '/':
+
+        if (Ct::CT_STRING_LITERAL != ct_top().type())
+        {
+            p = process_comment(p);
+            return ++p;
+        }
+        break;
+
+    case '(':
+
+        if (Ct::CT_NONE == ct_top().type())
+        {
+            if (!tokens.empty())
+            {
+                ct_push(Ct(Ct::CT_FUNCTION, tokens.back()));
+                ct_push(Ct::CT_FUNCTION_ARGS);
+            }
+            return p;
+        }
+        break;
+
+    case ')':
+
+        if (Ct::CT_FUNCTION_ARGS == ct_top().type())
+        {
+            ct_pop();
+            return ++p;
+        }
+        break;
+
+    case '{':
+
+        switch (ct_top().type())
+        {
+        case Ct::CT_FUNCTION:
+            ct_push(Ct::CT_FUNCTION_BODY);
+            return p;
+            break;
+
+        case Ct::CT_STRUCT:
+            ct_push(Ct::CT_STRUCT_BODY);
+            return p;
+            break;
+
+        default:
+            ct_push(Ct::CT_CODE_BLOCK);
+            return p;
+            break;
+        }
+        break;
+
+    case '}':
+
+        switch (ct_top().type())
+        {
+        case Ct::CT_FUNCTION_BODY:
+            tokens.clear();
+            ct_pop();
+            ct_pop(); //exit also CT_FUNCTION level
+            return ++p;
+            break;
+
+        case Ct::CT_STRUCT:
+            ct_pop();
+            return ++p;
+            break;
+
+        case Ct::CT_CODE_BLOCK:
+            ct_pop();
+            return ++p;
+            break;
+
+        default:
+            break;
+        }
+        break;
+
+    case ';':
+
+        if (Ct::CT_FUNCTION == ct_top().type())
+        {
+            std::cout << "function declaration" << std::endl;
+            ct_pop();
+            tokens.clear();
+            return ++p;
+        }
+        else if (Ct::CT_STRUCT == ct_top().type())
+        {
+            ct_pop();
+            tokens.clear();
+            return ++p;
+        }
+        break;
+
+    case '=':
+
+        /* variable/struct/class initialization */
+        std::cout << "variable/struct/class initialization" << std::endl;
+        p = goto_char(';', p);
+        tokens.clear();
+        return ++p;
+        break;
+    }
+
+    /* Token: Identifier, Specifier, Punctuator, ... */
+    p = try_token(p);
+    
+    if (!token.empty())
+    {
+        tokens.push_back(token);
+
+        if ("typedef" == token)
+        {
+            ct_push(Ct::CT_TYPEDEF);
+        }
+        else if ("struct" == token)
+        {
+            ct_push(Ct::CT_STRUCT);
+        }
+        else if ("enum" == token)
+        {
+            ct_push(Ct::CT_ENUM);
+        }
+        else if ("extern" == token)
+        {
+            ct_push(Ct::CT_EXTERN);
+        }
+        return p;
+    }
+
+    throw PExcept::E_UNRESOLVED;
+    
+    return nullptr;
 }
 
 const char* Parser::process_comment(const char* p)
@@ -258,16 +420,16 @@ const char* Parser::process_comment(const char* p)
     {
     case '/':
         std::cout << "L_COMMENT_LINE" << std::endl;
-        level.push(L_COMMENT_LINE);
-        p = goto_nextline(p);
-        level.pop();
+        ct_push(Ct::CT_COMMENT_LINE);
+        p = goto_eol(p);
+        ct_pop();
         break;
 
     case '*':
         std::cout << "L_COMMENT_BLOCK" << std::endl;
-        level.push(L_COMMENT_BLOCK);
-        p = goto_commentblock_passend(p);
-        level.pop();
+        ct_push(Ct::CT_COMMENT_BLOCK);
+        p = goto_commentblock_end(p);
+        ct_pop();
         break;
     }
     return p;
@@ -276,71 +438,46 @@ const char* Parser::process_comment(const char* p)
 const char* Parser::process_macro(const char* p)
 {
     std::cout << "L_MACRO ";
-    if (determine_word(++p))
+    if (try_token(++p))
     {
-        std::cout << word;
+        std::cout << token;
     }
     std::cout << std::endl;
-    level.push(L_MACRO);
-    p =  goto_nextline(p);
-    level.pop();
+    p =  goto_eol(p);
+    ct_pop();
     return p;
 }
 
 const char* Parser::process_typedef(const char* p)
 {
     std::cout << "L_TYPEDEF" << std::endl;
-    level.push(L_TYPEDEF);
     p = goto_char(';', p);
-    hold.clear();
-    level.pop();
+    tokens.clear();
+    ct_pop();
     return p;
 }
 
 const char* Parser::process_enum(const char* p)
 {
     std::cout << "L_ENUM"  << std::endl;
-    level.push(L_ENUM);
     p = goto_char(';', p);
-    hold.clear();
-    level.pop();
+    tokens.clear();
+    ct_pop();
     return p;
 }
 
 const char* Parser::process_struct(const char* p)
 {
-    std::string struct_name = hold.back();
-    std::cout << "L_STRUCT " << struct_name << std::endl;
-    level.push(L_STRUCT);
-    p = skip_blankspaces(p);
-    if ('{' == *p)
-    {
-        p = process_struct_body(p);
-        /* this was struct definition */
-        p = goto_char(';', p);
-    }
-    else
-    {
-        if (L_STRUCT_BODY == level.top())
-        {
-            /* this was struct ref */
-        }
-        else
-        {
-            /* this was struct declaration */
-        }
-    }
-    hold.clear();
-    level.pop();
+    std::cout << "L_STRUCT " << std::endl;
     return p;
 }
 
 const char* Parser::process_struct_body(const char* p)
 {
     std::cout << "L_STRUCT_BODY" << std::endl;
-    level.push(L_STRUCT_BODY);
-    p = find_closing_bracket(p);
-    level.pop();
+    p = goto_char(';', p);
+    ct_pop();
+    ct_pop();
     return p;
 }
 
@@ -348,66 +485,45 @@ const char* Parser::process_struct_body(const char* p)
 
 const char* Parser::process_function(const char* p)
 {
-    std::string function_name = hold.back();
-    std::cout << "L_FUNCTION " << function_name << std::endl;
-    level.push(L_FUNCTION);
-    p = process_function_args(p);
-    p = skip_blankspaces(p);
-    if ('{' == *p)
-    {
-        p = process_function_body(p);
-        /* this was function definition */
-        std::cout << "function definition" << std::endl;
-    }
-    else if (';' == *p)
-    {
-        /* this was function declaration */
-        std::cout << "function declaration" << std::endl;
-    }
-    else
-    {
-        /* this was function call */
-        std::cout << "function call" << std::endl;
-    }
-    hold.clear();
-    ++p;
-    level.pop();
     return p;
 }
 
 const char* Parser::process_function_args(const char* p)
 {
     std::cout << "L_FUNCTION_ARGS" << std::endl;
-    level.push(L_FUNCTION_ARGS);
     p = find_closing_bracket(p);
-    ++p;
-    level.pop();
     return p;
 }
 
 const char* Parser::process_function_body(const char* p)
 {
     std::cout << "L_FUNCTION_BODY" << std::endl;
-    level.push(L_FUNCTION_BODY);
     p = find_closing_bracket(p);
+    return p;
+}
+
+const char* Parser::try_token(const char* p)
+{
+    const char * p1 = p;
+    while (('\0' != *p) && isspecifier(*p)) ++p;
+    token = std::string(p1, p-p1);
+    return p;
+}
+
+void Parser::ct_push(Ct construct)
+{
+    std::cout << ">> C.type:" << construct.type() << " C.name:" << construct.name() << std::endl;
+    level.push(construct);
+}
+
+void Parser::ct_push(Ct::Type type)
+{
+    std::cout << ">> C.type:" << type << std::endl;
+    level.push(Ct(type));
+}
+
+void Parser::ct_pop()
+{
     level.pop();
-    return p;
 }
 
-const char* Parser::determine_word(const char* p)
-{
-    const char * p1 = p;
-    while (isalnum_us(*p)) ++p;
-    word = std::string(p1, p-p1);
-    //std::cout << word << std::endl;
-    return p;
-}
-
-const char* Parser::determine_specifier(const char* p)
-{
-    const char * p1 = p;
-    while (isspecifier(*p)) ++p;
-    word = std::string(p1, p-p1);
-    //std::cout << word << std::endl;
-    return p;
-}
