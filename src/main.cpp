@@ -16,6 +16,7 @@ int main(int argc, char **argv)
     {
         //std::string file("C:/Users/paskulin/source/repos/Projects.SPS.MSW2/src/application/ep2/ep2.h");
         std::string file("C:/Users/paskulin/source/repos/Projects.SPS.MSW2/src/application/ep2/ep2_app.c");
+        //std::string file("C:/Users/paskulin/source/repos/Projects.SPS.MSW2/src/application/ep2/ep2_select.h");
         p.parse(file);
     }
 
